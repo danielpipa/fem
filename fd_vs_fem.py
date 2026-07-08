@@ -2,13 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.signal as ss
 from tqdm import tqdm
-import sympy as sym # import symbols, Piecewise, integrate, And
-from scipy.sparse import csr_array
+import sympy as sym
 
-cs = [5000, 1000]
-dxs = [40e-6, 8e-6]
+cs = [6000, 1500]
+dxs = [40e-6, 10e-6]
 dt = .8e-9
-Lx = 10e-3
+Lx = 15e-3
 Lt = 6e-6
 
 xfem = np.block([np.arange(0, Lx/2, dxs[0]), np.arange(Lx/2, Lx + dxs[1], dxs[1])])
@@ -16,9 +15,6 @@ Nx = len(xfem)
 dx = Lx / (Nx-1)
 xfd = np.arange(Nx) * dx
 
-# print(xfem[-1], xfd[-1])
-
-# Nx = round(Lx / dx)
 Nt = round(Lt / dt)
 
 C = max(cs) * dt / min(dxs)
@@ -35,15 +31,11 @@ c2fem[xfem <= Lx/2] = cs[0]**2
 c2fem[xfem > Lx/2] = cs[1]**2
 
 f0 = 5e6
-bw = .99
-
+# bw = .99
 t = np.arange(Nt) * dt
-# x = np.arange(Nx) * dx
 
-# N = len(x)
-
-t0 = 3 * bw / f0
-s = ss.gausspulse(t - t0, f0, bw)
+t0 = 3 / f0
+# s = ss.gausspulse(t - t0, f0, bw)
 def ricker(t, f0):
     sigma = .25 / f0
     tmp = (1 - (t/sigma)**2) * np.exp(-t**2 / (2 * sigma**2))
@@ -83,8 +75,8 @@ f_i = sym.Piecewise((1, sym.And(xspim1 <= xsp, xsp <= xspip1)), (0, True))
 def buildMat(x, phi_i, phi_j):
     N = len(x)
     M = np.zeros((N, N))
-    Mij = sym.lambdify((xspim1, xspi, xspip1, xspjm1, xspj, xspjp1), sym.integrate(phi_i * phi_j, (xsp, x[0], x[-1])), "numpy")
-    #for i, j in tqdm(itertools.product(range(N), range(N))):
+    Mij = sym.lambdify((xspim1, xspi, xspip1, xspjm1, xspj, xspjp1),
+                       sym.integrate(phi_i * phi_j, (xsp, x[0], x[-1])), "numpy")
     for i in tqdm(range(N)):
         xim1 = x[i - 1] if i > 0 else x[0]+1
         xip1 = x[i + 1] if i < N - 1 else x[-1]-1
@@ -97,7 +89,8 @@ def buildMat(x, phi_i, phi_j):
     return M
 
 def buildf(x, xs):
-    fi = sym.lambdify((xspim1, xspi, xspip1), sym.integrate(f_i * phi_i, (xsp, x[0], x[-1])), "numpy")
+    fi = sym.lambdify((xspim1, xspi, xspip1),
+                      sym.integrate(f_i * phi_i, (xsp, x[0], x[-1])), "numpy")
     f = np.zeros(len(x))
     k = np.argmin(np.abs(xs - x))
     f[k] = fi(x[k-1], x[k], x[k+1])
@@ -118,11 +111,11 @@ print("Building matrices...")
 M = buildMat(xfem, phi_i, phi_j)
 K = buildMat(xfem, dphi_i, dphi_j)
 
-Minv = np.linalg.pinv(M)
+Minv = np.linalg.inv(M)
 
-# M = csr_array(M)
-# K = csr_array(K)
-# Minv = csr_array(Minv)
+# M = sparray(M)
+# K = sparray(K)
+# Minv = sparray(Minv)
 
 # plt.figure()
 # plt.imshow(K)
@@ -171,7 +164,7 @@ for nt in tqdm(range(Nt)):
     
     if not nt % 30:
         line0.set_ydata(ufd_0)
-        line1.set_ydata(buildu(xfem, ufem_0))
-    # line1.set_ydata(ufem_0)
+        # line1.set_ydata(buildu(xfem, ufem_0))
+        line1.set_ydata(ufem_0)
     # ax[1].set_title(f"FEM {nt/Nt:.2f}")
     plt.pause(0.0001)
