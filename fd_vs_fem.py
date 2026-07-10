@@ -6,9 +6,13 @@ import sympy as sym
 
 cs = [6000, 1500]
 dxs = [40e-6, 10e-6]
-dt = .8e-9
+dt = .2e-9
 Lx = 15e-3
 Lt = 6e-6
+
+# FEM polynomial order
+p = 1
+# p = 2
 
 xfem = np.block([np.arange(0, Lx/2, dxs[0]), np.arange(Lx/2, Lx + dxs[1], dxs[1])])
 Nx = len(xfem)
@@ -44,37 +48,29 @@ s = ricker(t - t0, f0)
 # plt.plot(t, s)
 # plt.show(block=True)
 
-xsp = sym.Symbol("xsp")
-xspim1, xspi, xspip1 = sym.symbols("xspim1, xspi, xspip1")
-xspjm1, xspj, xspjp1 = sym.symbols("xspjm1, xspj, xspjp1")
-phi_i = sym.Piecewise(((xsp - xspi) / (xspi - xspim1) + 1, sym.And(xspim1 <= xsp, xsp <= xspi)),
-                      (1 - (xsp-xspi) / (xspip1-xspi), sym.And(xspi <= xsp, xsp <= xspip1)),
-                      (0, True))
+xsym = sym.Symbol("xsym")
+xsymi, xsymip1 = sym.symbols("xsymi, xsymip1")
 
-ksi = (xsp-xspi)/(xspip1-xspi)
-N1 = sym.Matrix([sym.Piecewise((1 - ksi, sym.And(xspi <= xsp, xsp <= xspip1)), (0, True)),
-               sym.Piecewise((ksi, sym.And(xspi <= xsp, xsp <= xspip1)), (0, True))])
-dN1 = N1.diff(xsp)
-N2 = sym.Matrix([sym.Piecewise((1 - 3*ksi + 2*ksi**2, sym.And(xspi <= xsp, xsp <= xspip1)), (0, True)),
-               sym.Piecewise((4*ksi - 4*ksi**2, sym.And(xspi <= xsp, xsp <= xspip1)), (0, True)),
-               sym.Piecewise((-ksi + 2*ksi**2, sym.And(xspi <= xsp, xsp <= xspip1)), (0, True))])
-dN2 = N2.diff(xsp)
+ksi = (xsym-xsymi)/(xsymip1-xsymi)
+N1 = sym.Matrix([sym.Piecewise((1 - ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+               sym.Piecewise((ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
+N2 = sym.Matrix([sym.Piecewise((1 - 3*ksi + 2*ksi**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+               sym.Piecewise((4*ksi - 4*ksi**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+               sym.Piecewise((-ksi + 2*ksi**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
 
-phi_j = phi_i.subs({xspim1: xspjm1, xspi: xspj, xspip1: xspjp1})
-dphi_i = sym.diff(phi_i, xsp)
-dphi_j = sym.diff(phi_j, xsp)
-f_i = sym.Piecewise((1, sym.And(xspim1 <= xsp, xsp <= xspip1)), (0, True))
+f_i = sym.Piecewise((1, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))
 
 # Debug
-DEBUG = True
-# DEBUG = False
+# DEBUG = True
+DEBUG = False
 
 if DEBUG:
     # dxfem = dx / 1000
     # Nxfem = round(Lx / dxfem)
     # xfem = np.arange(Nxfem) * dxfem
     #
-    xfem = np.array([0,1,2,3,4,7,9,10])
+    # xfem = np.array([0,1,2,3,4,7,9,10])
+    # xfem = np.array([0, 1, 2, 3])
     # # x = np.arange(10)
     # N = len(xfem)
     # dxfem = .01
@@ -83,116 +79,88 @@ if DEBUG:
     #     xim1 = xfem[i-1] if i > 0 else xfem[0]+1
     #     xip1 = xfem[i+1] if i < N - 1 else xfem[-1]-1
     #     xi = xfem[i]
-    #     # plt.plot(xfem, sym.lambdify(xsp, phi_i.subs({xspim1: xim1, xspi: xi, xspip1: xip1}), "numpy")(xfem), color=f"C{i}")
-    #     # plt.plot(xfem, sym.lambdify(xsp, dphi_i.subs({xspim1: xim1, xspi: xi, xspip1: xip1}), "numpy")(xfem), color=f"C{i}", linestyle="dashed")
-    #     for n1 in N1:
-    #         plt.plot(x, sym.lambdify(xsp, n1.subs({xspi: xi, xspip1: xip1}), "numpy")(x), color=f"C{i}")
+    #     for n1 in N2:
+    #         plt.plot(x, sym.lambdify(xsym, n1.subs({xsymi: xi, xsymip1: xip1}), "numpy")(x), color=f"C{i}")
     # plt.show(block=True)
     pass
 
-def buildMat(x, phi_i, phi_j):
-    N = len(x)
-    M = np.zeros((N, N))
-    Mij = sym.lambdify((xspim1, xspi, xspip1, xspjm1, xspj, xspjp1),
-                       sym.integrate(phi_i * phi_j, (xsp, x[0], x[-1])), "numpy")
-    for i in tqdm(range(N)):
-        xim1 = x[i - 1] if i > 0 else x[0]+1
-        xip1 = x[i + 1] if i < N - 1 else x[-1]-1
-        xi = x[i]
-        for j in range(max(0, i-1), min(N, i+2)):
-            xjm1 = x[j - 1] if j > 0 else x[0]+1
-            xjp1 = x[j + 1] if j < N - 1 else x[-1]-1
-            xj = x[j]
-            M[i, j] = Mij(xim1, xi, xip1, xjm1, xj, xjp1)
-    return M
-
-def buildf(x, xs):
-    fi = sym.lambdify((xspim1, xspi, xspip1),
-                      sym.integrate(f_i * phi_i, (xsp, x[0], x[-1])), "numpy")
-    f = np.zeros(len(x))
-    k = np.argmin(np.abs(xs - x))
-    f[k] = fi(x[k-1], x[k], x[k+1])
-    return f
-
-# phii = sym.lambdify((xsp, xspim1, xspi, xspip1), phi_i, "numpy")
-# def buildu(x, ufem):
-#     N = len(ufem)
-#     u = np.zeros(N)
-#     for i in range(N):
-#         xim1 = x[i - 1] if i > 0 else x[0]+1
-#         xip1 = x[i + 1] if i < N - 1 else x[-1]-1
-#         xi = x[i]
-#         u += ufem[i] * phii(x, xim1, xi, xip1)
-#     return u
-
-def buildMatN(x, Ne):
+def buildMat(x, Ne):
     N = len(x)  # Number of nodes
     ndof = len(Ne)  # Number of degrees of freedom per element
-    Ndof = len(x) * (ndof - 1)  # Number of degrees of freedom TOTAL
+    Ndof = (N - 1) * (ndof - 1) + 1  # Number of degrees of freedom TOTAL
     M = np.zeros((Ndof, Ndof))
-    Me_lmbd = sym.lambdify((xspi, xspip1), (Ne @ Ne.T).integrate((xsp, xspi, xspip1)), "numpy")
+    Me_lmbd = sym.lambdify((xsymi, xsymip1), (Ne @ Ne.T).integrate((xsym, xsymi, xsymip1)), "numpy")
     for i in tqdm(range(N - 1)):
         xip1 = x[i + 1] if i < N - 1 else x[-1]-1
         xi = x[i]
-        M[np.ix_(np.arange(i, i + ndof), np.arange(i, i + ndof))] += Me_lmbd(xi, xip1)
+        r = np.arange((ndof - 1) * i, (ndof - 1) * i + ndof)
+        M[np.ix_(r, r)] += Me_lmbd(xi, xip1)
     return M
+
+def buildf(x, Ne, xs):
+    N = len(x)  # Number of nodes
+    ndof = len(Ne)  # Number of degrees of freedom per element
+    Ndof = (N - 1) * (ndof - 1) + 1  # Number of degrees of freedom TOTAL
+    fe_lmbd = sym.lambdify((xsymi, xsymip1),
+                      (Ne * f_i).integrate((xsym, xsymi, xsymip1)), "numpy")
+    f = np.zeros(Ndof)
+    k = np.argmin(np.abs(xs - x))
+    f[k] = np.sum(fe_lmbd(x[k], x[k+1]))
+    return f
 
 # def buildu(x, ui, Ne):
 #     N = len(x)
 #     u = np.zeros(N)
 #     for ne in Ne:
 
+if p == 1:
+    Ne = N1
+elif p == 2:
+    Ne = N2
+    c2fem = np.kron(c2fem, np.ones(p))[:-1]
+
+dNe = Ne.diff(xsym)
 
 print("Building matrices...")
-
-M = buildMatN(xfem, N1)
-K = buildMatN(xfem, dN1)
-
+M = buildMat(xfem, Ne)
+K = buildMat(xfem, dNe)
+f = buildf(xfem, Ne, Lx/3)
 Minv = np.linalg.inv(M)
+print("Done building matrices.")
 
 # M = sparray(M)
 # K = sparray(K)
 # Minv = sparray(Minv)
 
 if DEBUG:
-    M = buildMat(xfem, phi_i, phi_j)
-    MN = buildMatN(xfem, N2)
-    K = buildMat(xfem, dphi_i, dphi_j)
-    KN = buildMatN(xfem, dN1)
-    # print(f"K vs KN {np.sum(np.abs(K - KN))}")
-    # print(f"M vs MN {np.sum(np.abs(M - MN))}")
+    M = buildMat(xfem, N2)
+    K = buildMat(xfem, dN2)
     plt.figure()
     plt.imshow(K)
     plt.title("K")
     plt.figure()
-    plt.imshow(KN)
-    plt.title("KN")
-    plt.figure()
     plt.imshow(M)
     plt.title("M")
     plt.figure()
-    plt.imshow(MN)
-    plt.title("MN")
-    # plt.figure()
-    # plt.imshow(Minv)
-    # plt.title("Minv")
+    plt.imshow(Minv)
+    plt.title("Minv")
     plt.show(block=True)
 
-f = buildf(xfem, Lx/3)
 
 #%%
 ufd_0 = np.zeros(Nx)
 ufd_1 = np.zeros(Nx)
 ufd_2 = np.zeros(Nx)
 
-ufem_0 = np.zeros(Nx)
-ufem_1 = np.zeros(Nx)
-ufem_2 = np.zeros(Nx)
+Ndof = K.shape[0]
+ufem_0 = np.zeros(Ndof)
+ufem_1 = np.zeros(Ndof)
+ufem_2 = np.zeros(Ndof)
 
 lap = np.zeros(Nx)
 fig, ax = plt.subplots(2, 1)
 line0, = ax[0].plot(xfd, ufd_0)
-line1, = ax[1].plot(xfem, ufem_0)
+line1, = ax[1].plot(xfem, ufem_0[::p])
 ymm = 1e-12
 ax[0].set_ylim(-ymm, ymm)
 ax[0].set_xlabel(None)
@@ -215,6 +183,6 @@ for nt in tqdm(range(Nt)):
     if not nt % 30:
         line0.set_ydata(ufd_0)
         # line1.set_ydata(buildu(xfem, ufem_0))
-        line1.set_ydata(ufem_0)
+        line1.set_ydata(ufem_0[::p])
     # ax[1].set_title(f"FEM {nt/Nt:.2f}")
     plt.pause(0.0001)
