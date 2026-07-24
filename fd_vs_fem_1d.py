@@ -4,8 +4,13 @@ import scipy.signal as ss
 from tqdm import tqdm
 import sympy as sym
 
+# FEM polynomial order
+p = 1
+# p = 2
+
 cs = [6000, 1500]
 dxs = [40e-6, 10e-6]
+# dxs = [80e-6, 20e-6]
 dt = .3e-9
 Lx = 15e-3
 Lt = 6e-6
@@ -21,17 +26,11 @@ f0 = 5e6
 # dt = 0.5 * (min(dxs) / max(cs)) / 2.0
 # # dt = 10e-6
 
-# FEM polynomial order
-# p = 1
-p = 2
-
 # xfem = np.block([np.arange(0, Lx/2, dxs[0]), np.arange(Lx/2, Lx + dxs[1], dxs[1])])
 xfem = np.arange(0, Lx/2, dxs[0])
 xfem = np.append(xfem, np.arange(xfem[-1] + dxs[0], Lx + dxs[1], dxs[1]))
 # xfem = np.arange(0, Lx, dxs[0])
 Nx = len(xfem)
-dx = Lx / (Nx-1)
-xfd = np.arange(Nx) * dx
 
 Nt = round(Lt / dt)
 
@@ -39,10 +38,6 @@ C = max(cs) * dt / min(dxs)
 print(f"Courant number: {C}")
 if C > 1:
     raise ValueError(f"Courant number {C} > 1")
-
-c2fd = np.zeros(Nx)
-c2fd[xfd <= Lx/2] = cs[0]**2 * dt**2 / dx**2
-c2fd[xfd > Lx/2] = cs[1]**2 * dt**2 / dx**2
 
 c2fem = np.zeros(Nx)
 c2fem[xfem <= Lx/2] = cs[0]**2
@@ -64,27 +59,38 @@ s = ricker(t - t0, f0)
 xsym = sym.Symbol("xsym")
 xsymi, xsymip1, hsym = sym.symbols("xsymi, xsymip1, hsym")
 
-ksi = (xsym-xsymi)/(xsymip1-xsymi)
-N1 = sym.Matrix([sym.Piecewise((1 - ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-               sym.Piecewise((ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
+# ksi = (xsym-xsymi)/(xsymip1-xsymi)
+ksi = (2*xsym/hsym)
+# N1 = sym.Matrix([sym.Piecewise((1 - ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+#                sym.Piecewise((ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
 
-N2 = sym.Matrix([sym.Piecewise((1 - 3*ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-               sym.Piecewise((4*ksi - 4*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-               sym.Piecewise((-ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True))])
+N1 = sym.Matrix([.5*(1-ksi), .5*(1+ksi)])
 
-N2 = sym.Matrix([1 - 3*ksi + 2*ksi**2, 4*ksi - 4*ksi**2, -ksi + 2*ksi**2])
+# N2 = sym.Matrix([sym.Piecewise((1 - 3*ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
+#                sym.Piecewise((4*ksi - 4*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
+#                sym.Piecewise((-ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True))])
+#
+# N2 = sym.Matrix([1 - 3*ksi + 2*ksi**2, 4*ksi - 4*ksi**2, -ksi + 2*ksi**2])
 
 # N2 = sym.Matrix([sym.Piecewise((.5*ksi*(ksi-1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
 #                sym.Piecewise((1-ksi**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
 #                sym.Piecewise((.5*ksi*(ksi+1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
 
+N2 = sym.Matrix([.5*ksi*(ksi-1), 1-ksi**2, .5*ksi*(ksi+1)])
 # N2 = sym.Matrix([.5*(2*xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, .5*(2*xsym/hsym)*(2*xsym/hsym+1)])
-N2 = sym.Matrix([(xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, (xsym/hsym)*(2*xsym/hsym+1)])
+# N2 = sym.Matrix([(xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, (xsym/hsym)*(2*xsym/hsym+1)])
 # N2 = sym.Matrix([ksi*(ksi-1), 2*(1-ksi**2), ksi*(ksi+1)])
+
+if p == 1:
+    Ne = N1
+elif p == 2:
+    Ne = N2
+    c2fem = np.kron(c2fem, np.ones(p))[:-1]
+
 h = 2
 x_ = np.arange(-h/2, h/2, .01)
-for n2 in N2:
-    plt.plot(x_, sym.lambdify((xsym, hsym), n2, "numpy")(x_, h))
+for ne in Ne:
+    plt.plot(x_, sym.lambdify((xsym, hsym), ne, "numpy")(x_, h))
 plt.show(block=True)
 
 #%%
@@ -153,12 +159,6 @@ def buildf(x, Ne, xs):
 #     u = np.zeros(N)
 #     for ne in Ne:
 
-if p == 1:
-    Ne = N1
-elif p == 2:
-    Ne = N2
-    c2fem = np.kron(c2fem, np.ones(p))[:-1]
-
 dNe = Ne.diff(xsym)
 
 print("Building matrices...")
@@ -194,16 +194,23 @@ if DEBUG_SHOW:
 
 
 #%%
-ufd_0 = np.zeros(Nx)
-ufd_1 = np.zeros(Nx)
-ufd_2 = np.zeros(Nx)
 
 Ndof = K.shape[0]
 ufem_0 = np.zeros(Ndof)
 ufem_1 = np.zeros(Ndof)
 ufem_2 = np.zeros(Ndof)
 
-lap = np.zeros(Nx)
+dx = Lx / (Ndof-1)
+xfd = np.arange(Ndof) * dx
+c2fd = np.zeros(Ndof)
+c2fd[xfd <= Lx/2] = cs[0]**2 * dt**2 / dx**2
+c2fd[xfd > Lx/2] = cs[1]**2 * dt**2 / dx**2
+
+ufd_0 = np.zeros(Ndof)
+ufd_1 = np.zeros(Ndof)
+ufd_2 = np.zeros(Ndof)
+
+lap = np.zeros(Ndof)
 fig, ax = plt.subplots(2, 1)
 line0, = ax[0].plot(xfd, ufd_0)
 line1, = ax[1].plot(xfem, ufem_0[::p])
@@ -221,7 +228,7 @@ for nt in tqdm(range(Nt)):
     ufd_1, ufd_2 = ufd_0, ufd_1
     lap[1:-1] = ufd_1[:-2] - 2 * ufd_1[1:-1] + ufd_1[2:]
     ufd_0 = 2 * ufd_1 - ufd_2 + c2fd * lap
-    ufd_0[Nx//3] += dt**2 * s[nt] / dx
+    ufd_0[Ndof//3] += dt**2 * s[nt] / dx
 
     ufem_1, ufem_2 = ufem_0, ufem_1
     ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * c2fem * Minv.T @ (f*s[nt]/(dxs[0]*c2fem) - K.T @ ufem_1)
