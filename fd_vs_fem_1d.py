@@ -5,16 +5,14 @@ from tqdm import tqdm
 import sympy as sym
 
 # FEM polynomial order
-p = 1
-# p = 2
+p = 2
 
-cs = [6000, 1500]
-dxs = [40e-6, 10e-6]
-# dxs = [80e-6, 20e-6]
-dt = .3e-9
-Lx = 15e-3
-Lt = 6e-6
-f0 = 5e6
+cs = [6000, 1500]  # Propagation speeds
+dxs = [p*40e-6, p*10e-6]  # Spatial step
+dt = .3e-9  # Time step
+Lx = 15e-3  # Spatial length
+Lt = 6e-6  # Temporal length
+f0 = 5e6  # Central frenquency
 
 # cs = [343.0, 343.0]  # Speed of sound (m/s)
 # dxs = [.25, .25]
@@ -31,6 +29,7 @@ xfem = np.arange(0, Lx/2, dxs[0])
 xfem = np.append(xfem, np.arange(xfem[-1] + dxs[0], Lx + dxs[1], dxs[1]))
 # xfem = np.arange(0, Lx, dxs[0])
 Nx = len(xfem)
+Ng = Nx * p + 1
 
 Nt = round(Lt / dt)
 
@@ -59,39 +58,50 @@ s = ricker(t - t0, f0)
 xsym = sym.Symbol("xsym")
 xsymi, xsymip1, hsym = sym.symbols("xsymi, xsymip1, hsym")
 
-# ksi = (xsym-xsymi)/(xsymip1-xsymi)
-ksi = (2*xsym/hsym)
-# N1 = sym.Matrix([sym.Piecewise((1 - ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((ksi, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
+# xisym = (xsym-xsymi)/(xsymip1-xsymi)
+xisym = (2 * xsym / hsym)
+# N1 = sym.Matrix([sym.Piecewise((1 - xisym, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+#                sym.Piecewise((xisym, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
 
-N1 = sym.Matrix([.5*(1-ksi), .5*(1+ksi)])
+# N1 = sym.Matrix([.5 * (1 - xisym), .5 * (1 + xisym)])
 
-# N2 = sym.Matrix([sym.Piecewise((1 - 3*ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-#                sym.Piecewise((4*ksi - 4*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-#                sym.Piecewise((-ksi + 2*ksi**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True))])
+# N2 = sym.Matrix([sym.Piecewise((1 - 3*xisym + 2*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
+#                sym.Piecewise((4*xisym - 4*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
+#                sym.Piecewise((-xisym + 2*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True))])
 #
-# N2 = sym.Matrix([1 - 3*ksi + 2*ksi**2, 4*ksi - 4*ksi**2, -ksi + 2*ksi**2])
+# N2 = sym.Matrix([1 - 3*xisym + 2*xisym**2, 4*xisym - 4*xisym**2, -xisym + 2*xisym**2])
 
-# N2 = sym.Matrix([sym.Piecewise((.5*ksi*(ksi-1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((1-ksi**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((.5*ksi*(ksi+1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
+# N2 = sym.Matrix([sym.Piecewise((.5*xisym*(xisym-1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+#                sym.Piecewise((1-xisym**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
+#                sym.Piecewise((.5*xisym*(xisym+1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
 
-N2 = sym.Matrix([.5*ksi*(ksi-1), 1-ksi**2, .5*ksi*(ksi+1)])
+# N2 = sym.Matrix([.5 * xisym * (xisym - 1), 1 - xisym**2, .5 * xisym * (xisym + 1)])
 # N2 = sym.Matrix([.5*(2*xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, .5*(2*xsym/hsym)*(2*xsym/hsym+1)])
 # N2 = sym.Matrix([(xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, (xsym/hsym)*(2*xsym/hsym+1)])
-# N2 = sym.Matrix([ksi*(ksi-1), 2*(1-ksi**2), ksi*(ksi+1)])
+# N2 = sym.Matrix([xisym*(xisym-1), 2*(1-xisym**2), xisym*(xisym+1)])
 
-if p == 1:
-    Ne = N1
-elif p == 2:
-    Ne = N2
+def buildShapeFunctions(p):
+    """Lagrange polynomials"""
+    Ne = sym.Matrix(p+1, 1, np.ones(p+1))
+    xi = np.linspace(-1, 1, p+1)
+    for i in range(p+1):
+        for j in range(p+1):
+            if i != j:
+                Ne[i, 0] *= (xisym - xi[j]) / (xi[i] - xi[j])
+    return Ne
+
+Ne = buildShapeFunctions(p)
+# if p == 1:
+#     Ne = buildShapeFunctions(p)
+if p > 1:
+    # Ne = N2
     c2fem = np.kron(c2fem, np.ones(p))[:-1]
 
-h = 2
-x_ = np.arange(-h/2, h/2, .01)
-for ne in Ne:
-    plt.plot(x_, sym.lambdify((xsym, hsym), ne, "numpy")(x_, h))
-plt.show(block=True)
+# h = 1
+# x_ = np.arange(-h/2, h/2, .01)
+# for ne in Ne:
+#     plt.plot(x_, sym.lambdify((xsym, hsym), ne, "numpy")(x_, h))
+# plt.show(block=True)
 
 #%%
 
@@ -131,7 +141,7 @@ def buildMat(x, Ne):
     Ndof = (N - 1) * (ndof - 1) + 1  # Number of degrees of freedom TOTAL
     M = np.zeros((Ndof, Ndof))
     # Me_lmbd = sym.lambdify((xsymi, xsymip1), (Ne @ Ne.T).integrate((xsym, xsymi, xsymip1)), "numpy")
-    Me_lmbd = sym.lambdify((hsym), (Ne @ Ne.T).integrate((xsym, -hsym, hsym)), "numpy")
+    Me_lmbd = sym.lambdify((hsym), (Ne @ Ne.T).integrate((xsym, -hsym/2, hsym/2)), "numpy")
     for i in tqdm(range(N - 1)):
         xip1 = x[i + 1] if i < N - 1 else x[-1]-1
         xi = x[i]
@@ -139,6 +149,7 @@ def buildMat(x, Ne):
         # M[np.ix_(r, r)] += Me_lmbd(xi, xip1)
         # M[np.ix_(r, r)] += Me_lmbd(0, xip1 - xi)
         M[np.ix_(r, r)] += Me_lmbd(xip1 - xi)
+        # [[1.333333333333373e-05, 6.666666666666431e-06], [6.666666666666431e-06, 1.333333333333373e-05]]
     return M
 
 def buildf(x, Ne, xs):
@@ -148,10 +159,10 @@ def buildf(x, Ne, xs):
     # fe_lmbd = sym.lambdify((xsymi, xsymip1),
     #                   (Ne * f_i).integrate((xsym, xsymi, xsymip1)), "numpy")
     fe_lmbd = sym.lambdify((hsym),
-                      (Ne * f_i).integrate((xsym, -hsym, hsym)), "numpy")
+                      (Ne * f_i).integrate((xsym, -hsym/2, hsym/2)), "numpy")
     f = np.zeros(Ndof)
     k = p * np.argmin(np.abs(xs - x))
-    f[k] = np.sum(fe_lmbd(x[k+1]-x[k]))
+    f[k] = p**2 * np.sum(fe_lmbd(x[k+1]-x[k]))
     return f
 
 # def buildu(x, ui, Ne):
@@ -220,7 +231,7 @@ ax[0].set_xlabel(None)
 ax[1].set_ylim(-ymm, ymm)
 
 ax[0].set_title(f"FD")
-ax[1].set_title(f"FEM")
+ax[1].set_title(rf"FEM $p = {p}$")
 
 plt.tight_layout()
 

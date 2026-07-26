@@ -6,7 +6,7 @@ import sympy as sym
 
 cs = [6000, 1500]
 dxs = [40e-6, 10e-6]
-dt = 0.2e-9
+dt = .3e-9
 Lx = 15e-3
 Lt = 6e-6
 
@@ -38,7 +38,7 @@ f0 = 5e6
 # bw = .99
 t = np.arange(Nt) * dt
 
-t0 = 3 / f0
+t0 = 1.5 / f0
 
 
 # s = ss.gausspulse(t - t0, f0, bw)
