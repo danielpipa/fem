@@ -5,10 +5,10 @@ from tqdm import tqdm
 import sympy as sym
 
 # FEM polynomial order
-p = 2
+polyOrd = 3
 
 cs = [6000, 1500]  # Propagation speeds
-dxs = [p*40e-6, p*10e-6]  # Spatial step
+dxs = [polyOrd * 80e-6, polyOrd * 20e-6]  # Spatial step
 dt = .3e-9  # Time step
 Lx = 15e-3  # Spatial length
 Lt = 6e-6  # Temporal length
@@ -24,26 +24,48 @@ f0 = 5e6  # Central frenquency
 # dt = 0.5 * (min(dxs) / max(cs)) / 2.0
 # # dt = 10e-6
 
-# xfem = np.block([np.arange(0, Lx/2, dxs[0]), np.arange(Lx/2, Lx + dxs[1], dxs[1])])
-xfem = np.arange(0, Lx/2, dxs[0])
-xfem = np.append(xfem, np.arange(xfem[-1] + dxs[0], Lx + dxs[1], dxs[1]))
-# xfem = np.arange(0, Lx, dxs[0])
-Nx = len(xfem)
-Ng = Nx * p + 1
+xfem = np.block([np.arange(0, Lx/2, dxs[0]), np.arange(Lx/2, Lx + dxs[1], dxs[1])])
+xgrid = np.arange(0, Lx/2, dxs[0])
+xgrid = np.append(xgrid, np.arange(xgrid[-1] + dxs[0], Lx + dxs[1], dxs[1]))
 
-Nt = round(Lt / dt)
+# xfem = np.arange(0, Lx/2, dxs[0] / polyOrd)
+# xfem = np.append(xfem, np.arange(xfem[-1] + dxs[0] / polyOrd, Lx + dxs[1] / polyOrd, dxs[1] / polyOrd))
+
+# xgrid = xfem[::polyOrd]
+# xfem = xfem[:-1]
+
+
+# xfem = xgrid[:-1]
+# xfem = np.arange(0, Lx, dxs[0])
+# Mx = len(xfem)  # Number of grid points
+# Me = Mx - 1  # Number of elements
+Me = len(xgrid) - 1
+Mg = Me * polyOrd + 1  # Number of collocation points (global matrices)
+
+def build_xfem():
+    xfem = np.zeros(Mg)
+    for i in range(Mg):
+        if i % 2 == 0:
+            xfem[i] = xgrid[i//polyOrd]
+        else:
+            xfem[i] = (xgrid[(i-1)//polyOrd] + xgrid[(i+1)//polyOrd]) / 2
+    return xfem
+
+xfem = build_xfem()
+
+Mt = round(Lt / dt)  # Number of temporal points
 
 C = max(cs) * dt / min(dxs)
 print(f"Courant number: {C}")
 if C > 1:
     raise ValueError(f"Courant number {C} > 1")
 
-c2fem = np.zeros(Nx)
+c2fem = np.zeros(Mg)
 c2fem[xfem <= Lx/2] = cs[0]**2
 c2fem[xfem > Lx/2] = cs[1]**2
 
 # bw = .99
-t = np.arange(Nt) * dt
+t = np.arange(Mt) * dt
 
 t0 = 1.5 / f0
 # s = ss.gausspulse(t - t0, f0, bw)
@@ -58,27 +80,7 @@ s = ricker(t - t0, f0)
 xsym = sym.Symbol("xsym")
 xsymi, xsymip1, hsym = sym.symbols("xsymi, xsymip1, hsym")
 
-# xisym = (xsym-xsymi)/(xsymip1-xsymi)
 xisym = (2 * xsym / hsym)
-# N1 = sym.Matrix([sym.Piecewise((1 - xisym, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((xisym, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
-
-# N1 = sym.Matrix([.5 * (1 - xisym), .5 * (1 + xisym)])
-
-# N2 = sym.Matrix([sym.Piecewise((1 - 3*xisym + 2*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-#                sym.Piecewise((4*xisym - 4*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True)),
-#                sym.Piecewise((-xisym + 2*xisym**2, sym.And(xsymi < xsym, xsym < xsymip1)), (0, True))])
-#
-# N2 = sym.Matrix([1 - 3*xisym + 2*xisym**2, 4*xisym - 4*xisym**2, -xisym + 2*xisym**2])
-
-# N2 = sym.Matrix([sym.Piecewise((.5*xisym*(xisym-1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((1-xisym**2, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True)),
-#                sym.Piecewise((.5*xisym*(xisym+1), sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))])
-
-# N2 = sym.Matrix([.5 * xisym * (xisym - 1), 1 - xisym**2, .5 * xisym * (xisym + 1)])
-# N2 = sym.Matrix([.5*(2*xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, .5*(2*xsym/hsym)*(2*xsym/hsym+1)])
-# N2 = sym.Matrix([(xsym/hsym)*(2*xsym/hsym-1), 1-(2*xsym/hsym)**2, (xsym/hsym)*(2*xsym/hsym+1)])
-# N2 = sym.Matrix([xisym*(xisym-1), 2*(1-xisym**2), xisym*(xisym+1)])
 
 def buildShapeFunctions(p):
     """Lagrange polynomials"""
@@ -90,12 +92,12 @@ def buildShapeFunctions(p):
                 Ne[i, 0] *= (xisym - xi[j]) / (xi[i] - xi[j])
     return Ne
 
-Ne = buildShapeFunctions(p)
-# if p == 1:
-#     Ne = buildShapeFunctions(p)
-if p > 1:
-    # Ne = N2
-    c2fem = np.kron(c2fem, np.ones(p))[:-1]
+Ne = buildShapeFunctions(polyOrd)
+# if polyOrd == 1:
+#     Ne = buildShapeFunctions(polyOrd)
+# if polyOrd > 1:
+#     # Ne = N2
+#     c2fem = np.kron(c2fem, np.ones(polyOrd))#[:-1]
 
 # h = 1
 # x_ = np.arange(-h/2, h/2, .01)
@@ -108,80 +110,43 @@ if p > 1:
 # f_i = sym.Piecewise((1, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))
 f_i = sym.Piecewise((1, sym.And(-hsym <= xsym, xsym <= hsym)), (0, True))
 
-# Debug
-# DEBUG1 = True
-DEBUG1 = False
-
-DEBUG_SHOW = True
-# DEBUG_SHOW = False
-
-if DEBUG1:
-    dxfem = dx / 1000
-    Nxfem = round(Lx / dxfem)
-    xfem = np.arange(Nxfem) * dxfem
-
-    xfem = np.array([0,1,2,3,4,7,9,10])
-    xfem = np.array([-2, -1, 1, 2, 3])
-    # x = np.arange(10)
-    N = len(xfem)
-    dxfem = .001
-    x = np.arange(-3, 13, dxfem)
-    for i in range(N):
-        xim1 = xfem[i-1] if i > 0 else xfem[0]+1
-        xip1 = xfem[i+1] if i < N - 1 else xfem[-1]-1
-        xi = xfem[i]
-        for n1 in N2:
-            plt.plot(x, sym.lambdify(xsym, n1.subs({xsymi: xi, xsymip1: xip1}), "numpy")(x), color=f"C{i}")
-    plt.show(block=True)
-    pass
-
-def buildMat(x, Ne):
-    N = len(x)  # Number of nodes
-    ndof = len(Ne)  # Number of degrees of freedom per element
-    Ndof = (N - 1) * (ndof - 1) + 1  # Number of degrees of freedom TOTAL
-    M = np.zeros((Ndof, Ndof))
-    # Me_lmbd = sym.lambdify((xsymi, xsymip1), (Ne @ Ne.T).integrate((xsym, xsymi, xsymip1)), "numpy")
+def buildMat(Ne):
+    M = np.zeros((Mg, Mg))
     Me_lmbd = sym.lambdify((hsym), (Ne @ Ne.T).integrate((xsym, -hsym/2, hsym/2)), "numpy")
-    for i in tqdm(range(N - 1)):
-        xip1 = x[i + 1] if i < N - 1 else x[-1]-1
-        xi = x[i]
-        r = np.arange((ndof - 1) * i, (ndof - 1) * i + ndof)
-        # M[np.ix_(r, r)] += Me_lmbd(xi, xip1)
-        # M[np.ix_(r, r)] += Me_lmbd(0, xip1 - xi)
-        M[np.ix_(r, r)] += Me_lmbd(xip1 - xi)
-        # [[1.333333333333373e-05, 6.666666666666431e-06], [6.666666666666431e-06, 1.333333333333373e-05]]
+    for i in tqdm(range(Me)):
+        x_ip1 = xgrid[i + 1] if i < Me else xgrid[-1]-1
+        x_i = xgrid[i]
+        r = np.arange(polyOrd * i, polyOrd * i + polyOrd + 1)
+        M[np.ix_(r, r)] += Me_lmbd(x_ip1 - x_i)
     return M
 
-def buildf(x, Ne, xs):
-    N = len(x)  # Number of nodes
-    ndof = len(Ne)  # Number of degrees of freedom per element
-    Ndof = (N - 1) * (ndof - 1) + 1  # Number of degrees of freedom TOTAL
-    # fe_lmbd = sym.lambdify((xsymi, xsymip1),
-    #                   (Ne * f_i).integrate((xsym, xsymi, xsymip1)), "numpy")
-    fe_lmbd = sym.lambdify((hsym),
-                      (Ne * f_i).integrate((xsym, -hsym/2, hsym/2)), "numpy")
-    f = np.zeros(Ndof)
-    k = p * np.argmin(np.abs(xs - x))
-    f[k] = p**2 * np.sum(fe_lmbd(x[k+1]-x[k]))
+fe_lmbd = sym.lambdify((hsym), (Ne * f_i).integrate((xsym, -hsym/2, hsym/2)), "numpy")
+
+def buildf(xs):
+    f = np.zeros(Mg)
+    k = np.argmin(np.abs(xs - xfem))
+    f[k] = np.sum(fe_lmbd(xfem[k + polyOrd] - xfem[k]))
     return f
 
-# def buildu(x, ui, Ne):
-#     N = len(x)
-#     u = np.zeros(N)
-#     for ne in Ne:
+def build_u(ufem):
+    u = np.zeros(Mg)
 
 dNe = Ne.diff(xsym)
 
 print("Building matrices...")
-M = buildMat(xfem, Ne)
-K = buildMat(xfem, dNe)
-f = buildf(xfem, Ne, Lx/3)
+M = buildMat(Ne)
+K = buildMat(dNe)
+f = buildf(Lx/3)
 Minv = np.linalg.inv(M)
 print("Done building matrices.")
 
 # M = sparray(M)
 # K = sparray(K)
 # Minv = sparray(Minv)
+
+# Debug
+# DEBUG_SHOW = True
+DEBUG_SHOW = False
 
 if DEBUG_SHOW:
     # M = buildMat(xfem, N2)
@@ -206,40 +171,40 @@ if DEBUG_SHOW:
 
 #%%
 
-Ndof = K.shape[0]
-ufem_0 = np.zeros(Ndof)
-ufem_1 = np.zeros(Ndof)
-ufem_2 = np.zeros(Ndof)
+ufem_0 = np.zeros(Mg)
+ufem_1 = np.zeros(Mg)
+ufem_2 = np.zeros(Mg)
 
-dx = Lx / (Ndof-1)
-xfd = np.arange(Ndof) * dx
-c2fd = np.zeros(Ndof)
+dx = Lx / (Mg - 1)
+xfd = np.arange(Mg) * dx
+c2fd = np.zeros(Mg)
 c2fd[xfd <= Lx/2] = cs[0]**2 * dt**2 / dx**2
 c2fd[xfd > Lx/2] = cs[1]**2 * dt**2 / dx**2
 
-ufd_0 = np.zeros(Ndof)
-ufd_1 = np.zeros(Ndof)
-ufd_2 = np.zeros(Ndof)
+ufd_0 = np.zeros(Mg)
+ufd_1 = np.zeros(Mg)
+ufd_2 = np.zeros(Mg)
 
-lap = np.zeros(Ndof)
+lap = np.zeros(Mg)
 fig, ax = plt.subplots(2, 1)
 line0, = ax[0].plot(xfd, ufd_0)
-line1, = ax[1].plot(xfem, ufem_0[::p])
+# line1, = ax[1].plot(xfem, ufem_0[::polyOrd])
+line1, = ax[1].plot(xfem, ufem_0)
 ymm = 1e-12
 ax[0].set_ylim(-ymm, ymm)
 ax[0].set_xlabel(None)
 ax[1].set_ylim(-ymm, ymm)
 
 ax[0].set_title(f"FD")
-ax[1].set_title(rf"FEM $p = {p}$")
+ax[1].set_title(rf"FEM $p = {polyOrd}$")
 
 plt.tight_layout()
 
-for nt in tqdm(range(Nt)):
+for nt in tqdm(range(Mt)):
     ufd_1, ufd_2 = ufd_0, ufd_1
     lap[1:-1] = ufd_1[:-2] - 2 * ufd_1[1:-1] + ufd_1[2:]
     ufd_0 = 2 * ufd_1 - ufd_2 + c2fd * lap
-    ufd_0[Ndof//3] += dt**2 * s[nt] / dx
+    ufd_0[Mg // 3] += dt**2 * s[nt] / dx
 
     ufem_1, ufem_2 = ufem_0, ufem_1
     ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * c2fem * Minv.T @ (f*s[nt]/(dxs[0]*c2fem) - K.T @ ufem_1)
@@ -247,7 +212,5 @@ for nt in tqdm(range(Nt)):
     
     if not nt % 100:
         line0.set_ydata(ufd_0)
-        # line1.set_ydata(buildu(xfem, ufem_0))
-        line1.set_ydata(ufem_0[::p])
-    # ax[1].set_title(f"FEM {nt/Nt:.2f}")
+        line1.set_ydata(ufem_0)
     plt.pause(0.0001)
