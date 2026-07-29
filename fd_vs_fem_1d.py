@@ -3,12 +3,13 @@ import matplotlib.pyplot as plt
 import scipy.signal as ss
 from tqdm import tqdm
 import sympy as sym
+import chaospy
 
 # FEM polynomial order
-polyOrd = 3
+polyOrd = 5
 
 cs = [6000, 1500]  # Propagation speeds
-dxs = [polyOrd * 80e-6, polyOrd * 20e-6]  # Spatial step
+dxs = [polyOrd * 100e-6, polyOrd * 30e-6]  # Spatial step
 dt = .3e-9  # Time step
 Lx = 15e-3  # Spatial length
 Lt = 6e-6  # Temporal length
@@ -39,19 +40,75 @@ xgrid = np.append(xgrid, np.arange(xgrid[-1] + dxs[0], Lx + dxs[1], dxs[1]))
 # xfem = np.arange(0, Lx, dxs[0])
 # Mx = len(xfem)  # Number of grid points
 # Me = Mx - 1  # Number of elements
-Me = len(xgrid) - 1
+Mx = len(xgrid)
+Me = Mx - 1
 Mg = Me * polyOrd + 1  # Number of collocation points (global matrices)
+
+from numpy.polynomial import legendre
+
+
+def gll_nodes_and_weights(n):
+    """
+    Returns the n Gauss-Lobatto-Legendre nodes and weights over [-1, 1].
+    n must be at least 2.
+    """
+    if n < 2:
+        raise ValueError("Number of nodes n must be >= 2.")
+
+    # Handle the minimal case manually
+    if n == 2:
+        return np.array([-1.0, 1.0]), np.array([1.0, 1.0])
+
+    # 1. Initialize the coefficients for P_{n-1}
+    # Polynomial sequence of length n represents degree n-1
+    coeffs = np.zeros(n)
+    coeffs[-1] = 1.0
+
+    # 2. Get the derivative of P_{n-1} and find its internal roots
+    P_nm1 = legendre.Legendre(coeffs)
+    internal_nodes = P_nm1.deriv().roots()
+
+    # 3. Combine endpoints [-1, 1] with the internal roots
+    nodes = np.hstack(([-1.0], internal_nodes, [1.0]))
+
+    # 4. Calculate the corresponding GLL weights
+    # Formula: w_i = 2 / (n * (n - 1) * [P_{n-1}(x_i)]^2)
+    P_vals = P_nm1(nodes)
+    weights = 2.0 / (n * (n - 1) * P_vals**2)
+
+    return nodes, weights
+
+
+# Example Usage: Generate 5 nodes
+nodes, _ = gll_nodes_and_weights(polyOrd + 1)
+print("Nodes:  ", nodes)
+
+
+# def build_xfem():
+#     xfem = np.zeros(Mg)
+#     nodes_ = ((nodes+1)/2)[:-1]
+#     for i in range(Mg):
+#         h = xgrid[(i+1)//polyOrd] - xgrid[(i-1)//polyOrd]
+#         xfem[i] = xgrid[i//polyOrd] + h * nodes_[i % polyOrd]
+#         # if i % polyOrd == 0:
+#         #     xfem[i] = xgrid[i//polyOrd]
+#         # else:
+#         #     xfem[i] = (xgrid[(i-1)//polyOrd] + xgrid[(i+1)//polyOrd]) / 2
+#     return xfem
 
 def build_xfem():
     xfem = np.zeros(Mg)
-    for i in range(Mg):
-        if i % 2 == 0:
-            xfem[i] = xgrid[i//polyOrd]
-        else:
-            xfem[i] = (xgrid[(i-1)//polyOrd] + xgrid[(i+1)//polyOrd]) / 2
+    nodes_ = ((nodes+1)/2)
+    for i in range(Mx-1):
+        h = xgrid[i+1] - xgrid[i]
+        for p in range(polyOrd):
+            xfem[polyOrd*i+p] = xgrid[i] + h * nodes_[p]
+    xfem[-1] = xfem[-2] + h * nodes_[1]
     return xfem
 
 xfem = build_xfem()
+
+# chaospy.quadrature.lobatto(4, chaospy.Uniform(-1, 1))
 
 Mt = round(Lt / dt)  # Number of temporal points
 
@@ -85,7 +142,7 @@ xisym = (2 * xsym / hsym)
 def buildShapeFunctions(p):
     """Lagrange polynomials"""
     Ne = sym.Matrix(p+1, 1, np.ones(p+1))
-    xi = np.linspace(-1, 1, p+1)
+    xi = nodes #np.linspace(-1, 1, p+1)
     for i in range(p+1):
         for j in range(p+1):
             if i != j:
@@ -103,9 +160,18 @@ Ne = buildShapeFunctions(polyOrd)
 # x_ = np.arange(-h/2, h/2, .01)
 # for ne in Ne:
 #     plt.plot(x_, sym.lambdify((xsym, hsym), ne, "numpy")(x_, h))
+# plt.grid(True)
+# # 1. Enable minor ticks on the axes
+# plt.minorticks_on()
+#
+# # 2. Style the major grid (thick lines)
+# plt.grid(which='major', linestyle='-', linewidth=1.0, color='gray')
+#
+# # 3. Style the minor grid (fine, thin lines)
+# plt.grid(which='minor', linestyle=':', linewidth=0.5, color='lightgray')
 # plt.show(block=True)
 
-#%%
+#%
 
 # f_i = sym.Piecewise((1, sym.And(xsymi <= xsym, xsym <= xsymip1)), (0, True))
 f_i = sym.Piecewise((1, sym.And(-hsym <= xsym, xsym <= hsym)), (0, True))
@@ -128,8 +194,16 @@ def buildf(xs):
     f[k] = np.sum(fe_lmbd(xfem[k + polyOrd] - xfem[k]))
     return f
 
-def build_u(ufem):
-    u = np.zeros(Mg)
+def build_plot_weights():
+    x_ = np.arange(-.5, .5, 1/polyOrd)
+    N = len(x_)
+    plot_weights = np.zeros(N)
+    for i in range(N):
+        plot_weights[i] = sym.lambdify((xsym, hsym), Ne[i], "numpy")(x_[i], 1)
+    return plot_weights
+
+print(build_plot_weights())
+#%%
 
 dNe = Ne.diff(xsym)
 
@@ -145,8 +219,8 @@ print("Done building matrices.")
 # Minv = sparray(Minv)
 
 # Debug
-# DEBUG_SHOW = True
-DEBUG_SHOW = False
+DEBUG_SHOW = True
+# DEBUG_SHOW = False
 
 if DEBUG_SHOW:
     # M = buildMat(xfem, N2)
@@ -193,10 +267,11 @@ line1, = ax[1].plot(xfem, ufem_0)
 ymm = 1e-12
 ax[0].set_ylim(-ymm, ymm)
 ax[0].set_xlabel(None)
+ax[0].grid()
 ax[1].set_ylim(-ymm, ymm)
-
 ax[0].set_title(f"FD")
 ax[1].set_title(rf"FEM $p = {polyOrd}$")
+ax[1].grid()
 
 plt.tight_layout()
 
@@ -214,3 +289,5 @@ for nt in tqdm(range(Mt)):
         line0.set_ydata(ufd_0)
         line1.set_ydata(ufem_0)
     plt.pause(0.0001)
+
+plt.show(block=True)
