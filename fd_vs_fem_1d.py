@@ -1,19 +1,31 @@
+# %%
+#
+# Daniel Rodrigues Pipa
+# Universidade Tecnológica Federal do Paraná
+# 2026
+#
+
 import numpy as np
+import numpy.typing as npt
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import scipy.signal as ss
 from tqdm import tqdm
 import sympy as sym
 import chaospy
 from numpy.polynomial import legendre
+from findiff import coefficients
 
 # FEM polynomial order of shape function
 polyOrd = 5
+SAVE_MOV = True
+# SAVE_MOV = False
 
 cs = [6000, 1500]  # Propagation speeds
 dxs = [polyOrd * 100e-6, polyOrd * 30e-6]  # Spatial step
-dt = .3e-9  # Time step
-Lx = 15e-3  # Spatial length
-Lt = 6e-6  # Temporal length
+dt = 3e-9  # Time step
+Lx = 30e-3  # Spatial length
+Lt = 10e-6  # Temporal length
 f0 = 5e6  # Central frenquency
 
 # Grid points
@@ -25,7 +37,7 @@ Me = Mx - 1  # Number of elements
 Mg = Me * polyOrd + 1  # Number of collocation points (global matrices)
 
 
-def gll_nodes_and_weights(n):
+def gll_nodes_and_weights(n: int):
     """
     Returns the n Gauss-Lobatto-Legendre nodes and weights over [-1, 1].
     """
@@ -94,7 +106,7 @@ t = np.arange(Mt) * dt  # Temporal points
 # Source term
 t0 = 1.5 / f0
 # s = ss.gausspulse(t - t0, f0, bw)
-def ricker(t, f0):
+def ricker(t: npt.NDArray, f0: float):
     sigma = .25 / f0
     tmp = (1 - (t/sigma)**2) * np.exp(-t**2 / (2 * sigma**2))
     return tmp / np.max(tmp)
@@ -109,7 +121,7 @@ s = ricker(t - t0, f0)
 xsym, hsym = sym.symbols("xsym, hsym")
 xisym = (2 * xsym / hsym)
 
-def buildShapeFunctions(p):
+def buildShapeFunctions(p: int):
     """Lagrange polynomials to be used as shape functions"""
     Ne = sym.Matrix(p+1, 1, np.ones(p+1))
     xi = nodes #np.linspace(-1, 1, p+1)
@@ -129,7 +141,7 @@ Ne = buildShapeFunctions(polyOrd)
 # plt.grid(True)
 # plt.show(block=True)
 
-def buildMat(Ne):
+def buildMat(Ne: sym.Matrix):
     """Generic function to build the mass and the stiffness matrix"""
     M = np.zeros((Mg, Mg))
     Me_lmbd = sym.lambdify((hsym), (Ne @ Ne.T).integrate((xsym, -hsym/2, hsym/2)), "numpy")
@@ -141,7 +153,7 @@ def buildMat(Ne):
     return M
 
 
-def buildf(xs):
+def buildf(xs: float):
     """Build source vector"""
     f_i = sym.Piecewise((1, sym.And(-hsym <= xsym, xsym <= hsym)), (0, True))
     fe_lmbd = sym.lambdify((hsym), (Ne * f_i).integrate((xsym, -hsym / 2, hsym / 2)), "numpy")
@@ -196,44 +208,65 @@ if DEBUG_SHOW:
 #%%
 
 # Explicit time marching simulations
-# TODO: increase derivative accuracy of fdmM with polynomial order for fairer comparison
+# fdmacc = polyOrd + 1
+# fdmacc += fdmacc % 2
+fdmacc = round(np.count_nonzero(K) / Mg) - 1
+coeffs = coefficients(deriv=2, acc=fdmacc)["center"]["coefficients"]
 
 ufem_0 = np.zeros(Mg)
 ufem_1 = np.zeros(Mg)
 ufem_2 = np.zeros(Mg)
 
-ufdmm_0 = np.zeros(Mg)
-ufdmm_1 = np.zeros(Mg)
-ufdmm_2 = np.zeros(Mg)
+ufdm_0 = np.zeros(Mg)
+ufdm_1 = np.zeros(Mg)
+ufdm_2 = np.zeros(Mg)
 
-lap = np.zeros(Mg)
-fig, ax = plt.subplots(2, 1)
-line0, = ax[0].plot(xfdmm, ufdmm_0)
+fig, ax = plt.subplots(2, 1, figsize=(10, 5), constrained_layout=True)
+line0, = ax[0].plot(xfdmm, ufdm_0)
 line1, = ax[1].plot(xfem, ufem_0)
 ymm = 1e-12
 ax[0].set_ylim(-ymm, ymm)
 ax[0].set_xlabel(None)
 ax[0].grid()
 ax[1].set_ylim(-ymm, ymm)
-ax[0].set_title(f"fdmM")
+ax[0].set_title(f"FDM acc = ${fdmacc}$")
 ax[1].set_title(rf"FEM $p = {polyOrd}$")
 ax[1].grid()
 
-plt.tight_layout()
-
-for nt in tqdm(range(Mt)):
-    ufdmm_1, ufdmm_2 = ufdmm_0, ufdmm_1
-    lap[1:-1] = ufdmm_1[:-2] - 2 * ufdmm_1[1:-1] + ufdmm_1[2:]
-    ufdmm_0 = 2 * ufdmm_1 - ufdmm_2 + c2fdmm * lap
-    ufdmm_0[Mg // 3] += dt**2 * s[nt] / dx
+def update(mt: int):
+    global ufem_0, ufem_1, ufem_2, ufdm_0, ufdm_1
+    ufdm_1, ufdm_2 = ufdm_0, ufdm_1
+    # lap[1:-1] = ufdm_1[:-2] - 2 * ufdm_1[1:-1] + ufdm_1[2:]
+    lap = np.convolve(ufdm_1, coeffs, mode="same")
+    ufdm_0 = 2 * ufdm_1 - ufdm_2 + c2fdmm * lap
+    ufdm_0[Mg // 3] += dt**2 * s[mt] / dx
 
     ufem_1, ufem_2 = ufem_0, ufem_1
-    ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * c2fem * Minv.T @ (f*s[nt]/(dxs[0]*c2fem) - K.T @ ufem_1)
-    # ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * Minv.T @ (f * s[nt] / dxs[0] - c2fem * K.T @ ufem_1)
+    ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * c2fem * Minv.T @ (f * s[mt] / (dxs[0] * c2fem) - K.T @ ufem_1)
+    # ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * Minv.T @ (f * s[mt] / dxs[0] - c2fem * K.T @ ufem_1)
     
-    if not nt % 100:
-        line0.set_ydata(ufdmm_0)
+    if SAVE_MOV and not mt % 100:
+        print(f"{100*(mt+1)/Mt:.1f}%")
+    if SAVE_MOV or not mt % 10:
+        fig.suptitle(f"{100*(mt+1)/Mt:.1f}%")
+        line0.set_ydata(ufdm_0)
         line1.set_ydata(ufem_0)
-    plt.pause(0.0001)
+        if not SAVE_MOV:
+            plt.pause(0.00001)
+    return line0, line1
 
-plt.show(block=True)
+# def update(nt):
+#     lines[0].set_ydata(g_R(x, t[nt]))
+#     lines[1].set_ydata(g_L(x, t[nt]))
+#     title.set_text(f"t = {t[nt]:.1f} s")
+#     return *lines, title
+
+if SAVE_MOV:
+    fps = 200
+    ani = animation.FuncAnimation(fig, update, frames=Mt, blit=True)
+    ani.save(f"fd_acc_{fdmacc}_fem_p_{polyOrd}.mp4", fps=fps)
+else:
+    for mt in tqdm(range(Mt)):
+        update(mt)
+
+# plt.show(block=True)
