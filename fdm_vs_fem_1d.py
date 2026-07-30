@@ -9,21 +9,19 @@ import numpy as np
 import numpy.typing as npt
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import scipy.signal as ss
 from tqdm import tqdm
 import sympy as sym
-import chaospy
 from numpy.polynomial import legendre
 from findiff import coefficients
 
-# FEM polynomial order of shape function
-polyOrd = 5
-SAVE_MOV = True
-# SAVE_MOV = False
+# Polynomial order of FEM shape function
+polyOrd = 1
+SAVE_MOVIE = True
+# SAVE_MOVIE = False
 
 cs = [6000, 1500]  # Propagation speeds
 dxs = [polyOrd * 100e-6, polyOrd * 30e-6]  # Spatial step
-dt = 3e-9  # Time step
+dt = 6e-9  # Time step
 Lx = 30e-3  # Spatial length
 Lt = 10e-6  # Temporal length
 f0 = 5e6  # Central frenquency
@@ -43,10 +41,6 @@ def gll_nodes_and_weights(n: int):
     """
     if n < 2:
         raise ValueError("Number of nodes n must be >= 2.")
-
-    # Handle the minimal case manually
-    if n == 2:
-        return np.array([-1.0, 1.0]), np.array([1.0, 1.0])
 
     # 1. Initialize the coefficients for P_{n-1}
     # Polynomial sequence of length n represents degree n-1
@@ -82,10 +76,10 @@ def build_xfem():
 
 xfem = build_xfem()
 
-C = max(cs) * dt / min(dxs)
-print(f"Courant number: {C}")
-if C > 1:
-    raise ValueError(f"Courant number {C} > 1")
+# C = max(cs) * dt / min(dxs)
+# print(f"Courant number: {C}")
+# if C > 1:
+#     raise ValueError(f"Courant number {C} > 1")
 
 # Place the propagation speeds
 c2fem = np.zeros(Mg)
@@ -245,13 +239,13 @@ def update(mt: int):
     ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * c2fem * Minv.T @ (f * s[mt] / (dxs[0] * c2fem) - K.T @ ufem_1)
     # ufem_0 = 2 * ufem_1 - ufem_2 + dt**2 * Minv.T @ (f * s[mt] / dxs[0] - c2fem * K.T @ ufem_1)
     
-    if SAVE_MOV and not mt % 100:
-        print(f"{100*(mt+1)/Mt:.1f}%")
-    if SAVE_MOV or not mt % 10:
-        fig.suptitle(f"{100*(mt+1)/Mt:.1f}%")
+    if SAVE_MOVIE and not mt % 25:
+        print(f"{100*(mt+1)/Mt:.0f}%")
+    if SAVE_MOVIE or not mt % 10:
+        fig.suptitle(f"{100*(mt+1)/Mt:.0f}%")
         line0.set_ydata(ufdm_0)
         line1.set_ydata(ufem_0)
-        if not SAVE_MOV:
+        if not SAVE_MOVIE:
             plt.pause(0.00001)
     return line0, line1
 
@@ -261,8 +255,8 @@ def update(mt: int):
 #     title.set_text(f"t = {t[nt]:.1f} s")
 #     return *lines, title
 
-if SAVE_MOV:
-    fps = 200
+if SAVE_MOVIE:
+    fps = 150
     ani = animation.FuncAnimation(fig, update, frames=Mt, blit=True)
     ani.save(f"fd_acc_{fdmacc}_fem_p_{polyOrd}.mp4", fps=fps)
 else:
